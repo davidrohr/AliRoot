@@ -188,7 +188,7 @@ int main(int argc, char** argv)
 	configStandalone.sliceCount = hlt.GetGPUMaxSliceCount();
 	hlt.SetGPUTracker(configStandalone.runGPU);
 
-	hlt.SetSettings(eventSettings.solenoidBz, eventSettings.homemadeEvents, eventSettings.constBz);
+	hlt.SetSettings(eventSettings.solenoidBz, eventSettings.constBz);
 	if (configStandalone.lowpt) hlt.SetHighQPtForward(1./0.1);
 	hlt.SetNWays(configStandalone.nways);
 	hlt.SetNWaysOuter(configStandalone.nwaysouter);
@@ -261,16 +261,13 @@ int main(int argc, char** argv)
 			fwrite(&eventSettings, sizeof(eventSettings), 1, fp);
 			fclose(fp);
 		}
-
-		InitEventGenerator();
-
+		
 		for (int i = 0;i < (configStandalone.NEvents == -1 ? 10 : configStandalone.NEvents);i++)
 		{
 			printf("Generating event %d/%d\n", i, configStandalone.NEvents == -1 ? 10 : configStandalone.NEvents);
 			sprintf(filename, "events/%s/" HLTCA_EVDUMP_FILE ".%d.dump", configStandalone.EventsDir, i);
 			GenerateEvent(hlt.Param(), filename);
 		}
-		FinishEventGenerator();
 #endif
 	}
 	else

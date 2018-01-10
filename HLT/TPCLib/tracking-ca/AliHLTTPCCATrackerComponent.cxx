@@ -28,6 +28,7 @@
 #include "AliHLTTPCGeometry.h"
 #include "AliHLTTPCCATrackerFramework.h"
 #include "AliHLTTPCCAParam.h"
+#include "AliHLTTPCCATrackConvertor.h"
 #include "AliHLTArray.h"
 
 #include "AliHLTTPCRawCluster.h"

@@ -91,7 +91,7 @@ public:
 
   GPUd() void ResetCovariance();
 
-  GPUd() bool CheckNumericalQuality() const ;
+  GPUd() bool CheckNumericalQuality(float overrideCovYY = -1.) const ;
 
   GPUd() bool Fit
   (
@@ -101,7 +101,9 @@ public:
    bool UseMeanPt = 0,
    float maxSinPhi = HLTCA_MAX_SIN_PHI
    );
-   
+  
+  GPUd() bool Rotate( float alpha, AliHLTTPCGMPhysicalTrackModel &t0, float maxSinPhi = HLTCA_MAX_SIN_PHI );
+  GPUd() bool Rotate( float alpha );
 
   GPUd() static float Reciprocal( float x ){ return 1./x; }
   GPUd() static void Assign( float &x, bool mask, float v ){
@@ -127,6 +129,12 @@ public:
 #endif
 
   private:
+      
+    GPUd() void ConstrainSinPhi()
+    {
+        if (fP[2] > HLTCA_MAX_SIN_PHI) fP[2] = HLTCA_MAX_SIN_PHI;
+        else if (fP[2] < -HLTCA_MAX_SIN_PHI) fP[2] = -HLTCA_MAX_SIN_PHI;
+    }
   
     float fX;      // x position
     float fZOffset;
