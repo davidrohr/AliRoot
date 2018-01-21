@@ -17,7 +17,7 @@
 //                                                                          *
 //***************************************************************************
 
-#define CADEBUG 0
+#define HLTCA_CADEBUG 0
 
 #include "AliHLTTPCCATracker.h"
 #include "AliHLTTPCCATrackParam.h"
@@ -86,7 +86,7 @@ MEM_CLASS_PRE23() GPUdi() void AliHLTTPCCATrackletConstructor::StoreTracklet
   GPUglobalref() MEM_GLOBAL(AliHLTTPCCATracklet) &tracklet = tracker.Tracklets()[r.fItr];
 
   tracklet.SetNHits( r.fNHits );
-  CADEBUG(printf("    DONE %d hits\n", r.fNHits);)
+  CADEBUG(printf("    DONE %d hits\n", r.fNHits))
 
   if ( r.fNHits > 0 ) {
     tracklet.SetFirstRow( r.fFirstRow );
@@ -197,7 +197,7 @@ MEM_CLASS_PRE2() GPUdi() void AliHLTTPCCATrackletConstructor::UpdateTracklet
           break;
         }
         CADEBUG(printf("%15s hits %3d: FIT PROP  ROW %3d X %8.3f -", "", r.fNHits, iRow, tParam.X());for (int i = 0;i < 5;i++) printf(" %8.3f", tParam.Par()[i]); printf(" -"); for (int i = 0;i < 15;i++) printf(" %8.3f", tParam.Cov()[i]); printf("\n");)
-        tracker.GetErrors2( iRow, tracker.Param().GetContinuousTracking() ? 125. : tParam.GetZ(), sinPhi, cosPhi, tParam.GetDzDs(), err2Y, err2Z );
+        tracker.GetErrors2( iRow, tParam.GetZ(), sinPhi, tParam.GetDzDs(), err2Y, err2Z );
 
         if (r.fNHits >= 10)
         {

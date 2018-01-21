@@ -95,7 +95,8 @@ bool MCComp(const AliHLTTPCClusterMCWeight& a, const AliHLTTPCClusterMCWeight& b
 #define ETA_MAX 1.5
 #define ETA_MAX2 0.9
 
-#define MIN_WEIGHT_CLS 40
+#define MIN_WEIGHT_CLS 40 // SG!!! 40
+
 #define FINDABLE_WEIGHT_CLS 70
 
 static const int ColorCount = 12;
@@ -558,7 +559,8 @@ void RunQA()
 		prop.SetPolynomialField( merger.pField() );		
 		prop.SetUseMeanMomentum(kFALSE );
 		prop.SetContinuousTracking( kFALSE );
-		
+		prop.SetToyMCEventsFlag( merger.SliceParam().ToyMCEventsFlag());
+
 		for (int i = 0; i < merger.NOutputTracks(); i++)
 		{
 			if (trackMCLabels[i] < 0) continue;
@@ -1133,8 +1135,8 @@ int DrawQAHistograms()
 						if (j == 0)
 						{
 							GetName(fname, k);
-							if (p) sprintf(name, "%s%s", fname, l ? "Mean Pull" : "Pull");
-							else sprintf(name, "%s%s", fname, l ? "Mean Resolution" : "Resolution");
+							if (p) sprintf(name, "%s%s", fname, l ? "Mean" : "Pull");
+							else sprintf(name, "%s%s", fname, l ? "Mean" : "Resolution");
 							leg->AddEntry(e, name, "l");
 						}
 					}

@@ -16,7 +16,7 @@
 //                                                                          *
 //***************************************************************************
 
-#define CADEBUG 0
+#define HLTCA_CADEBUG 0
 #define PRINT_TRACKS 0
 #define MIRROR 1
 #define DOUBLE 1
@@ -48,6 +48,8 @@ GPUd() bool AliHLTTPCGMTrackParam::Fit(const AliHLTTPCGMPolynomialField* field, 
   prop.SetUseMeanMomentum( UseMeanPt );
   prop.SetContinuousTracking( param.GetContinuousTracking() );
   prop.SetMaxSinPhi( maxSinPhi );
+  prop.SetToyMCEventsFlag( param.ToyMCEventsFlag());
+
 
   if (param.GetContinuousTracking())
   {  
@@ -98,6 +100,7 @@ GPUd() bool AliHLTTPCGMTrackParam::Fit(const AliHLTTPCGMPolynomialField* field, 
         fOuterParam.fX = fX;
         fOuterParam.fAlpha = prop.GetAlpha();
     }
+    if (iWay && fabs(fP[4]) < 1) prop.SetSpecialErrors(true);
     CADEBUG(printf("Fitting track %d way %d\n", nTracks, iWay);)
 
     int resetT0 = CAMath::Max(10.f, CAMath::Min(40.f, 150.f / fP[4]));
@@ -107,6 +110,7 @@ GPUd() bool AliHLTTPCGMTrackParam::Fit(const AliHLTTPCGMPolynomialField* field, 
     const float maxSinForUpdate = CAMath::Sin(70.*kDeg2Rad);
   
     ResetCovariance();
+    prop.SetFitInProjections(iWay != 0);
     prop.SetTrack( this, iWay ? prop.GetAlpha() : Alpha);
 
     N = 0;
@@ -118,7 +122,6 @@ GPUd() bool AliHLTTPCGMTrackParam::Fit(const AliHLTTPCGMPolynomialField* field, 
     for(;ihit >= 0 && ihit<maxN;ihit += wayDirection)
     {
       if (clusters[ihit].fState < 0) continue; // hit is excluded from fit
-      const int rowType = clusters[ihit].fRow < 64 ? 0 : clusters[ihit].fRow < 128 ? 2 : 1;
       CADEBUG(printf("\tHit %3d/%3d Row %3d: Cluster Alpha %8.3f    , X %8.3f - Y %8.3f, Z %8.3f\n", ihit, maxN, clusters[ihit].fRow, param.Alpha(clusters[ihit].fSlice), clusters[ihit].fX, clusters[ihit].fY, clusters[ihit].fZ);)
       
       float xx = clusters[ihit].fX;
@@ -187,7 +190,7 @@ GPUd() bool AliHLTTPCGMTrackParam::Fit(const AliHLTTPCGMPolynomialField* field, 
               CADEBUG(printf(" - Mirroring!!!");)
               prop.Mirror(inFlyDirection);
               float err2Y, err2Z;
-              prop.GetErr2(err2Y, err2Z, param, zz, rowType);
+              prop.GetErr2(err2Y, err2Z, param, zz, clusters[ihit].fRow);
               prop.Model().Y() = fP[0] = yy;
               prop.Model().Z() = fP[1] = zz;
               lastUpdateX = fX;
@@ -225,7 +228,7 @@ GPUd() bool AliHLTTPCGMTrackParam::Fit(const AliHLTTPCGMPolynomialField* field, 
       int retVal;
       float threshold = 3. + (lastUpdateX >= 0 ? (fabs(fX - lastUpdateX) / 2) : 0.);
       if (fNDF > 5 && (fabs(yy - fP[0]) > threshold || fabs(zz - fP[1]) > threshold)) retVal = 2;
-      else retVal = prop.Update( yy, zz, rowType, param, rejectChi2ThisRound);
+      else retVal = prop.Update( yy, zz, clusters[ihit].fRow, param, rejectChi2ThisRound);
       CADEBUG(printf("\t%21sFit     Alpha %8.3f    , X %8.3f - Y %8.3f, Z %8.3f   -   QPt %7.2f (%7.2f), SinPhi %5.2f (%5.2f) %28s    ---   Cov sY %8.3f sZ %8.3f sSP %8.3f sPt %8.3f   -   YPt %8.3f SPPt %8.3f YSP %8.3f   -   Err %d\n", "", prop.GetAlpha(), fX, fP[0], fP[1], fP[4], prop.GetQPt0(), fP[2], prop.GetSinPhi0(), "", sqrt(fC[0]), sqrt(fC[2]), sqrt(fC[5]), sqrt(fC[14]), fC[10], fC[12], fC[3], retVal);)
 
       if (retVal == 0) // track is updated
@@ -280,7 +283,8 @@ GPUd() bool AliHLTTPCGMTrackParam::Fit(const AliHLTTPCGMPolynomialField* field, 
       Rotate(dAngle);
       Alpha += dAngle;
   }
-  if (fabs(fP[0]) > fX*tan(kSectAngle / 2.f)) {printf("OUT OF SECTOR BOUNDS Y %f > Max %f - X %f\n", fP[0], fX * tan(kSectAngle / 2.f), fX);}
+  if (Alpha > 3.1415926535897) Alpha -= 2*3.1415926535897;
+  else if (Alpha <= 3.1415926535897) Alpha += 2*3.1415926535897;
   
   return(ok);
 }
@@ -399,71 +403,6 @@ GPUg() void RefitTracks(AliHLTTPCGMMergedTrack* tracks, int nTracks, const AliHL
 }
 
 #endif
-
-
-GPUd() bool AliHLTTPCGMTrackParam::Rotate( float alpha, AliHLTTPCGMPhysicalTrackModel &t0, float maxSinPhi )
-{
-  //* Rotate the coordinate system in XY on the angle alpha
-
-  float cA = CAMath::Cos( alpha );
-  float sA = CAMath::Sin( alpha );
-  float x0 = t0.X(), y0 = t0.Y(), sinPhi0 = t0.SinPhi(), cosPhi0 = t0.CosPhi();
-  float cosPhi =  cosPhi0 * cA + sinPhi0 * sA;
-  float sinPhi = -cosPhi0 * sA + sinPhi0 * cA;
-
-  if ( CAMath::Abs( sinPhi ) > maxSinPhi || CAMath::Abs( cosPhi ) < 1.e-2 || CAMath::Abs( cosPhi0 ) < 1.e-2  ) return 0;
-
-  //float J[5][5] = { { j0, 0, 0,  0,  0 }, // Y
-  //                    {  0, 1, 0,  0,  0 }, // Z
-  //                    {  0, 0, j2, 0,  0 }, // SinPhi
-  //                  {  0, 0, 0,  1,  0 }, // DzDs
-  //                  {  0, 0, 0,  0,  1 } }; // Kappa
-
-  float j0 = cosPhi0 / cosPhi;
-  float j2 = cosPhi / cosPhi0;
-  float d[2] = {Y() - y0, SinPhi() - sinPhi0};
-
-  {
-    float px = t0.Px();
-    float py = t0.Py();
-    
-    t0.X()  =  x0*cA + y0*sA;
-    t0.Y()  = -x0*sA + y0*cA;
-    t0.Px() =  px*cA + py*sA;
-    t0.Py() = -px*sA + py*cA;
-    t0.UpdateValues();
-  }
-  
-  X() = t0.X();
-  Y() = t0.Y() + j0*d[0];
-
-  SinPhi() = sinPhi + j2*d[1] ;
-
-  fC[0] *= j0 * j0;
-  fC[1] *= j0;
-  fC[3] *= j0;
-  fC[6] *= j0;
-  fC[10] *= j0;
-
-  fC[3] *= j2;
-  fC[4] *= j2;
-  fC[5] *= j2 * j2;
-  fC[8] *= j2;
-  fC[12] *= j2;
-  if( cosPhi <0 ){ // change direction ( t0 direction is already changed in t0.UpdateValues(); )
-    SinPhi() = -SinPhi();
-    DzDs() = -DzDs();
-    QPt() = -QPt();
-    fC[3] = -fC[3];
-    fC[4] = -fC[4];
-    fC[6] = -fC[6];
-    fC[7] = -fC[7];
-    fC[10] = -fC[10];
-    fC[11] = -fC[11];
-  }
-  
-  return true;
-}
 
 GPUd() bool AliHLTTPCGMTrackParam::Rotate( float alpha )
 {

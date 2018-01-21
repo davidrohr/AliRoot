@@ -38,7 +38,7 @@ MEM_CLASS_PRE() class AliHLTTPCCAParam
                             float rMin, float rMax, float zMin, float zMax,
                             float padPitch, float zSigma, float bz );
     void Update();
-    void LoadClusterErrors();
+    void LoadClusterErrors( bool Print=0 );
 #endif //!HLTCA_GPUCODE
 
 	GPUd() void Slice2Global( float x, float y,  float z,
@@ -71,6 +71,8 @@ MEM_CLASS_PRE() class AliHLTTPCCAParam
     GPUd() float ConstBz() const { return fConstBz;}
     GPUd() bool AssumeConstantBz() const { return fAssumeConstantBz; }
     GPUd() void SetAssumeConstantBz(bool v) { fAssumeConstantBz = v; }
+    GPUd() bool ToyMCEventsFlag() const { return fToyMCEventsFlag; }
+    GPUd() void SetToyMCEventsFlag(bool v) { fToyMCEventsFlag = v; }
 
     GPUd() float NeighboursSearchArea() const { return fNeighboursSearchArea; }
     GPUd() float TrackConnectionFactor() const { return fTrackConnectionFactor; }
@@ -125,28 +127,32 @@ MEM_CLASS_PRE() class AliHLTTPCCAParam
     GPUd() void SetContinuousTracking( bool v ){ fContinuousTracking = v; }
     GPUd() void SetTrackReferenceX( float v) { fTrackReferenceX = v; }
 
-    GPUd() float GetClusterError2( int yz, int type, float z, float angle2 ) const;
-    GPUd() void GetClusterErrors2( int row, float z, float sinPhi, float cosPhi, float DzDs, float &Err2Y, float &Err2Z ) const;
-    GPUd() void GetClusterErrors2v1( int rowType, float z, float sinPhi, float cosPhi, float DzDs, float &Err2Y, float &Err2Z ) const;
+    GPUd() float GetClusterRMS( int yz, int type, float z, float angle2 ) const;
+    GPUd() void GetClusterRMS2( int row, float z, float sinPhi, float DzDs, float &ErrY2, float &ErrZ2 ) const;
 
-    GPUd() float GetClusterError2New( int yz, int type, float z, float angle2 ) const;
-    GPUd() void GetClusterErrors2New( int rowType, float z, float sinPhi, float cosPhi, float DzDs, float &Err2Y, float &Err2Z ) const;
+    GPUd() float GetClusterError2( int yz, int type, float z, float angle2 ) const;
+    GPUd() void GetClusterErrors2( int row, float z, float sinPhi, float DzDs, float &ErrY2, float &ErrZ2 ) const;
 
 #if !defined(__OPENCL__) || defined(HLTCA_HOSTCODE)
     void WriteSettings( std::ostream &out ) const;
     void ReadSettings( std::istream &in );
 #endif
 
+    GPUd() void SetParamRMS0( int i, int j, int k, float val ) {
+      fParamRMS0[i][j][k] = val;
+    }
+  
+    GPUd() const MakeType(float*) GetParamRMS0(int i, int j) const { return fParamRMS0[i][j]; }
+ 
     GPUd() void SetParamS0Par( int i, int j, int k, float val ) {
       fParamS0Par[i][j][k] = val;
     }
   
     GPUd() const MakeType(float*) GetParamS0Par(int i, int j) const { return fParamS0Par[i][j]; }
- 
+
     GPUd() float GetBzkG() const { return fBzkG;}
     GPUd() float GetConstBz() const { return fConstBz;}
-    GPUd() float GetBz( float x, float y, float z ) const;
-    MEM_CLASS_PRE2() GPUd() float GetBz( const MEM_LG2(AliHLTTPCCATrackParam) &t ) const {return GetBz( t.X(), t.Y(), t.Z() );}
+
   protected:
     int fISlice; // slice number
     int fNRows; // number of rows
@@ -178,24 +184,15 @@ MEM_CLASS_PRE() class AliHLTTPCCAParam
     int fNWays;          //Do N fit passes in final fit of merger
     bool fNWaysOuter;    //Store outer param
     bool fAssumeConstantBz; //Assume a constant magnetic field
+    bool fToyMCEventsFlag; //events were build with home-made event generator
     bool fContinuousTracking; //Continuous tracking, estimate bz and errors for abs(z) = 125cm during seeding
     float fSearchWindowDZDR; //Use DZDR window for seeding instead of vertex window
     float fTrackReferenceX; //Transport all tracks to this X after tracking (disabled if > 500)
 
-    float fRowX[200];// X-coordinate of rows
-    float fParamS0Par[2][3][7];    // cluster error parameterization coeficients (OLD)
-    float fParamRMS0[2][3][4]; // cluster error parameterization coeficients (NEW)
-    float fPolinomialFieldBz[6];   // field coefficients
+    float fRowX[HLTCA_ROW_COUNT];// X-coordinate of rows    
+    float fParamRMS0[2][3][4]; // cluster shape parameterization coeficients 
+    float fParamS0Par[2][3][6]; // cluster error parameterization coeficients
 };
 
-
-
-MEM_CLASS_PRE() GPUd() inline float MEM_LG(AliHLTTPCCAParam)::GetBz( float x, float y, float z ) const
-{
-  float r2 = x * x + y * y;
-  float r  = CAMath::Sqrt( r2 );
-  const float *c = fPolinomialFieldBz;
-  return ( c[0] + c[1]*z  + c[2]*r  + c[3]*z*z + c[4]*z*r + c[5]*r2 );
-}
 
 #endif //ALIHLTTPCCAPARAM_H
