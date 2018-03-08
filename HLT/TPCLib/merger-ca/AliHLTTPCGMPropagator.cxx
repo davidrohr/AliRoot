@@ -16,20 +16,20 @@
 //                                                                          *
 //***************************************************************************
 
-// #define GMPropagatorUseFullField
+
 
 #include "AliHLTTPCGMPropagator.h"
 #include "AliHLTTPCCAMath.h"
 #include "AliHLTTPCGMPhysicalTrackModel.h"
 #include "AliHLTTPCCAParam.h"
+#include "AliHLTTPCGMMergedTrackHit.h"
 #include <cmath>
 
 
-#if defined(GMPropagatorUseFullField) & !defined(HLTCA_STANDALONE) & !defined(HLTCA_GPUCODE)
+#if defined(GMPropagatorUseFullField)
 #include "AliTracker.h"
 #include "AliMagF.h"
 #endif
-
 
 GPUd() void  AliHLTTPCGMPropagator::GetBxByBz( float Alpha, float X, float Y, float Z, float B[3] ) const
 {
@@ -41,7 +41,7 @@ GPUd() void  AliHLTTPCGMPropagator::GetBxByBz( float Alpha, float X, float Y, fl
   float cs = AliHLTTPCCAMath::Cos(Alpha);
   float sn = AliHLTTPCCAMath::Sin(Alpha);
 
-#if defined(GMPropagatorUseFullField) & !defined(HLTCA_STANDALONE) & !defined(HLTCA_GPUCODE)
+#if defined(GMPropagatorUseFullField)
   const double kCLight = 0.000299792458;
   double r[3] = { X*cs - Y*sn, X*sn + Y*cs, Z };
   double bb[3];
@@ -90,7 +90,7 @@ GPUd()  float  AliHLTTPCGMPropagator::GetBz( float Alpha, float X, float Y, floa
   float cs = AliHLTTPCCAMath::Cos(Alpha);
   float sn = AliHLTTPCCAMath::Sin(Alpha);  
 
-#if defined(GMPropagatorUseFullField) & !defined(HLTCA_STANDALONE) & !defined(HLTCA_GPUCODE)
+#if defined(GMPropagatorUseFullField)
   const double kCLight = 0.000299792458;
   double r[3] = { X*cs - Y*sn, X*sn + Y*cs, Z };
   double bb[3];
@@ -198,8 +198,7 @@ GPUd() int AliHLTTPCGMPropagator::RotateToAlpha( float newAlpha )
     c[ 8] *= j1;
   }
   
-  if( px1 <0 ){ // change direction 
-    t0.SetDirectionAlongX(); 
+  if( t0.SetDirectionAlongX() ){ // change direction if Px < 0
     fT->SinPhi() = -fT->SinPhi();
     fT->DzDs()   = -fT->DzDs();
     fT->QPt()    = -fT->QPt();    
@@ -274,7 +273,7 @@ GPUd() int AliHLTTPCGMPropagator::PropagateToXAlpha(float posX, float posAlpha, 
   
   AliHLTTPCGMPhysicalTrackModel t0e(fT0);
   float dLp = 0;
-  if (t0e.PropagateToXBxByBz( posX, B[0], B[1], B[2], dLp )) return 1;
+  if (t0e.PropagateToXBxByBz( posX, B[0], B[1], B[2], dLp ) && t0e.PropagateToXBzLight( posX, B[2], dLp )) return 1;
 
   if( fabs( t0e.SinPhi() ) >= fMaxSinPhi ) return -3;
 
@@ -356,7 +355,7 @@ GPUd() int AliHLTTPCGMPropagator::PropagateToXAlpha(float posX, float posAlpha, 
     float n11 = c41 + j13*c43;
     float n12 = c42 + j24*c44;
         
-    c[0]+= j02*j02c22 + j04*j04c44 + float(2.f)*( j02*c20ph04c42  + j04*c40 );
+    c[0]+= j02*j02c22 + j04*j04c44 + 2.f*( j02*c20ph04c42  + j04*c40 );
     c[1]+= j02*c21 + j04*c41 + j13*n6;
     c[2]+= j13*(c31 + n7);
     c[3] = c20ph04c42 + j02c22  + j24*n10;
@@ -450,7 +449,7 @@ GPUd() int AliHLTTPCGMPropagator::PropagateToXAlpha(float posX, float posAlpha, 
 
   if( 1||!fToyMCEvents ){  
     //std::cout<<"APPLY ENERGY LOSS!!!"<<std::endl;
-    float corr = float(1.f) - fMaterial.fEP2* dLmask ;
+    float corr = 1.f - fMaterial.fEP2* dLmask ;
     float corrInv = 1.f/corr;
     fT0.Px()*=corrInv;
     fT0.Py()*=corrInv;
@@ -479,6 +478,37 @@ GPUd() int AliHLTTPCGMPropagator::PropagateToXAlpha(float posX, float posAlpha, 
     fC44 += dLabs * fMaterial.fK44;
   }
 
+  return 0;
+}
+
+GPUd() int AliHLTTPCGMPropagator::GetPropagatedYZ(float x, float& projY, float& projZ)
+{
+  float bz = GetBz(fAlpha, fT->X(), fT->Y(), fT->Z());
+  float k  = fT0.QPt() * bz;
+  float dx = x - fT->X();
+  float kdx = k * dx;
+  float ex = fT0.CosPhi();
+  float ey = fT0.SinPhi();
+  float ey1 = kdx + ey;
+  if(fabs(ey1) > HLTCA_MAX_SIN_PHI) return 1;
+  float ss = ey + ey1;
+  float ex1 = sqrt(1.f - ey1 * ey1);
+  float cc = ex + ex1;
+  float dxcci = dx / cc;
+  float dy = dxcci * ss;
+  float norm2 = 1.f + ey * ey1 + ex * ex1;
+  float dl = dxcci * sqrt(norm2 + norm2);
+  float dS;
+  {
+    float dSin = 0.5f * k*dl;
+    float a = dSin * dSin;
+    const float k2 = 1.f / 6.f;
+    const float k4 = 3.f / 40.f;
+    dS = dl + dl * a * (k2 + a * (k4));
+  }
+  float dz = dS * fT0.DzDs();
+  projY = fT->Y() + dy;
+  projZ = fT->Z() + dz;
   return 0;
 }
 
@@ -564,7 +594,7 @@ GPUd() int AliHLTTPCGMPropagator::PropagateToXAlphaBz(float posX, float posAlpha
       
   c[8] = c32 + h24*c43;
   
-  c[0]+= h02*h02c22 + h04*h04c44 + float(2.f)*( h02*c20ph04c42  + h04*c40 );
+  c[0]+= h02*h02c22 + h04*h04c44 + 2.f*( h02*c20ph04c42  + h04*c40 );
   
   c[1]+= h02*c21 + h04*c41 + h13*n6;
   c[6] = n6;
@@ -595,7 +625,7 @@ GPUd() int AliHLTTPCGMPropagator::PropagateToXAlphaBz(float posX, float posAlpha
   bool maskMS = ( fabs( dL ) < fMaterial.fDLMax );
   if( maskMS ) dLmask = dL;
   float dLabs = fabs( dLmask); 
-  float corr = float(1.f) - fMaterial.fEP2* dLmask ;
+  float corr = 1.f - fMaterial.fEP2* dLmask ;
 
   float corrInv = 1.f/corr;
   fT0.Px()*=corrInv;
@@ -624,22 +654,34 @@ GPUd() int AliHLTTPCGMPropagator::PropagateToXAlphaBz(float posX, float posAlpha
 }
 */
 
-GPUd() void AliHLTTPCGMPropagator::GetErr2(float& err2Y, float& err2Z, const AliHLTTPCCAParam &param, float posZ, int iRow)
+GPUd() void AliHLTTPCGMPropagator::GetErr2(float& err2Y, float& err2Z, const AliHLTTPCCAParam &param, float posZ, int iRow, short clusterState)
 {
   if (fSpecialErrors) param.GetClusterErrors2( iRow, fContinuousTracking ? 125. : posZ, fT0.GetSinPhi(), fT0.DzDs(), err2Y, err2Z );
   else param.GetClusterRMS2( iRow, fContinuousTracking ? 125. : posZ, fT0.GetSinPhi(), fT0.DzDs(), err2Y, err2Z );
+
+  if (clusterState & AliHLTTPCGMMergedTrackHit::flagEdge) {err2Y += 0.35;err2Z += 0.15;}
+  if (clusterState & AliHLTTPCGMMergedTrackHit::flagSingle) {err2Y += 0.2;err2Z += 0.2;}
+  if (clusterState & (AliHLTTPCGMMergedTrackHit::flagSplitPad | AliHLTTPCGMMergedTrackHit::flagShared | AliHLTTPCGMMergedTrackHit::flagSingle)) {err2Y += 0.03;err2Y *= 3;}
+  if (clusterState & (AliHLTTPCGMMergedTrackHit::flagSplitTime | AliHLTTPCGMMergedTrackHit::flagShared | AliHLTTPCGMMergedTrackHit::flagSingle)) {err2Z += 0.03;err2Z *= 3;}
+  fStatErrors.GetOfflineStatisticalErrors(err2Y, err2Z, fT0.SinPhi(), fT0.DzDs(), clusterState);
 }
 
-GPUd() int AliHLTTPCGMPropagator::Update( float posY, float posZ, int iRow, const AliHLTTPCCAParam &param, bool rejectChi2 )
+GPUd() int AliHLTTPCGMPropagator::Update( float posY, float posZ, int iRow, const AliHLTTPCCAParam &param, short clusterState, bool rejectChi2, bool refit )
 {
   float *fC = fT->Cov();
   float *fP = fT->Par();
 
   float err2Y, err2Z;
-  GetErr2(err2Y, err2Z, param, posZ, iRow);
+  GetErr2(err2Y, err2Z, param, posZ, iRow, clusterState);
   
   if ( fT->NDF()==-5 ) { // first measurement: no need to filter, as the result is known in advance. just set it. 
     fT->ResetCovariance();
+    if (refit)
+    {
+        fC[14] = CAMath::Max(0.5f, fabs(fP[4]));
+        fC[5] = CAMath::Max(0.2f, fabs(fP[2]) / 2);
+        fC[9] = CAMath::Max(0.5f, fabs(fP[3]) / 2);
+    }
     fP[ 0] = posY;
     fP[ 1] = posZ;
     fC[ 0] = err2Y;
@@ -654,17 +696,18 @@ GPUd() int AliHLTTPCGMPropagator::Update( float posY, float posZ, int iRow, cons
   float z0 = posY - fP[0];
   float z1 = posZ - fP[1];
 
-  float w0, w1, w2, dChi2;
-
+  float w0, w1, w2, chiY, chiZ;
   if (fFitInProjections)
   {
     w0 = 1./(err2Y + d00);
+    w1 = 0;
     w2 = 1./(err2Z + d11);
-    dChi2 = w0*z0*z0 + w2*z1*z1;
+    chiY = w0*z0*z0;
+    chiZ = w2*z1*z1;
   }
   else
   {
-    w0=fC[2]+err2Z,  w1=fC[1], w2=fC[0]+err2Y;
+    w0 = d11 + err2Z, w1 = d10, w2 = d00 + err2Y;
     { // Invert symmetric matrix
       float det = w0*w2 - w1*w1;
       if( CAMath::Abs(det)<1.e-10 ) return -1;
@@ -673,14 +716,14 @@ GPUd() int AliHLTTPCGMPropagator::Update( float posY, float posZ, int iRow, cons
       w1 = -w1*det;
       w2 =  w2*det;
     }
-    dChi2 = CAMath::Abs( (w0*z0 + w1*z1 )*z0 + (w1*z0 + w2*z1 )*z1 );
+    chiY = CAMath::Abs( (w0*z0 + w1*z1 ) * z0 );
+    chiZ = CAMath::Abs( (w1*z0 + w2*z1 ) * z1 );
   }
-  //printf("hits %d chi2 %f, new %f %f (dy %f dz %f)\n", N, fChi2, mS0 * z0 * z0, mS2 * z1 * z1, z0, z1);
-  //float tmpCut = param.HighQPtForward() < fabs(fT0.GetQPt()) ? 5 : 5; // change to fT0
-  //if (rejectChi2 && (mS0*z0*z0 > tmpCut || mS2*z1*z1 > tmpCut)) return 2;  
-  //SG!!! if( fabs( fP[2] + z0*c20*mS0  ) > fMaxSinPhi ) return 1;
+  float dChi2 = chiY + chiZ;
+  //printf("hits %d chi2 %f, new %f %f (dy %f dz %f)\n", N, fChi2, chiY, chiZ, z0, z1);
+  if (fSpecialErrors && rejectChi2 && RejectCluster(chiY, chiZ, clusterState)) return 2; //DRTOTO get rid of stupid specialerror
  
-  fT->Chi2()+= dChi2;
+  fT->Chi2() += dChi2;
   fT->NDF() += 2;
 
   if (fFitInProjections)
@@ -763,8 +806,8 @@ GPUd() float AliHLTTPCGMPropagator::ApproximateBetheBloch( float beta2 )
   // (the approximation is reasonable only for solid materials)
   //------------------------------------------------------------------
 
-  const float log0 = log( float(5940.f));
-  const float log1 = log( float(3.5f*5940.f) );
+  const float log0 = log( 5940.f );
+  const float log1 = log( 3.5f*5940.f );
 
   bool bad = (beta2 >= .999f)||( beta2 < 1.e-8f );
 
@@ -792,7 +835,6 @@ GPUd() void AliHLTTPCGMPropagator::CalculateMaterialCorrection()
   const float mass = 0.13957;
   
   float qpt = fT0.GetQPt();
-  if( fUseMeanMomentum ) qpt = 1./0.35;
   if (fabs(qpt) > 20) qpt = 20;
 
   float w2 = ( 1. + fT0.GetDzDs() * fT0.GetDzDs() );//==(P/pt)2
@@ -901,7 +943,7 @@ GPUd() void AliHLTTPCGMPropagator::Mirror(bool inFlyDirection)
     bool maskMS = ( fabs( dL ) < fMaterial.fDLMax );
     if( maskMS ) dLmask = dL;
     float dLabs = fabs( dLmask); 
-    float corr = float(1.f) - fMaterial.fEP2* dLmask ;
+    float corr = 1.f - fMaterial.fEP2* dLmask ;
     
     float corrInv = 1.f/corr;
     fT0.Px()*=corrInv;

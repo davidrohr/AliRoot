@@ -189,7 +189,6 @@ int main(int argc, char** argv)
 	hlt.SetGPUTracker(configStandalone.runGPU);
 
 	hlt.SetSettings(eventSettings.solenoidBz, eventSettings.homemadeEvents, eventSettings.constBz);
-	if (configStandalone.lowpt) hlt.SetHighQPtForward(1./0.1);
 	hlt.SetNWays(configStandalone.nways);
 	hlt.SetNWaysOuter(configStandalone.nwaysouter);
 	if (configStandalone.cont) hlt.SetContinuousTracking(configStandalone.cont);
@@ -526,7 +525,7 @@ int main(int argc, char** argv)
 						hlt.SetOutputControl((char*) outputmemory, configStandalone.outputcontrolmem);
 					}
 
-					int tmpRetVal = hlt.ProcessEvent(configStandalone.forceSlice);
+					int tmpRetVal = hlt.ProcessEvent(configStandalone.forceSlice, j <= configStandalone.runsInit);
 					int nTracks = 0, nClusters = 0;
 					for (int k = 0;k < hlt.Merger().NOutputTracks();k++) if (hlt.Merger().OutputTracks()[k].OK()) nTracks++;
 					for (int k = 0;k < 36;k++) nClusters += hlt.ClusterData(k).NumberOfClusters();

@@ -35,7 +35,6 @@
 #include "AliHLTTPCCATrackLinearisation.h"
 
 #include "AliHLTTPCGMTrackParam.h"
-#include "AliHLTTPCGMTrackLinearisation.h"
 #include "AliHLTTPCGMSliceTrack.h"
 #include "AliHLTTPCGMBorderTrack.h"
 #include <cmath>
@@ -44,6 +43,10 @@
 
 #include "AliHLTTPCCAGPUConfig.h"
 #include "MemoryAssignmentHelpers.h"
+
+#if defined(BUILD_QA) && defined(HLTCA_STANDALONE) && !defined(HLTCA_GPUCODE)
+#include "include.h"
+#endif
 
 #define DEBUG 0
 
@@ -175,7 +178,7 @@ void AliHLTTPCGMMerger::SetSliceData( int index, const AliHLTTPCCASliceOutput *s
   fkSlices[index] = sliceData;
 }
 
-bool AliHLTTPCGMMerger::Reconstruct()
+bool AliHLTTPCGMMerger::Reconstruct(bool resetTimers)
 {
   //* main merging routine
 
@@ -186,6 +189,11 @@ bool AliHLTTPCGMMerger::Reconstruct()
   HighResTimer timer;
   static double times[5] = {};
   static int nCount = 0;
+  if (resetTimers)
+  {
+    for (unsigned int k = 0;k < sizeof(times) / sizeof(times[0]);k++) times[k] = 0;
+    nCount = 0;
+  }
 #endif
   //cout<<"Merger..."<<endl;
   for( int iter=0; iter<nIter; iter++ ){
@@ -209,7 +217,7 @@ bool AliHLTTPCGMMerger::Reconstruct()
 #ifdef HLTCA_STANDALONE
     times[3] += timer.GetCurrentElapsedTime(true);
 #endif
-    Refit();
+    Refit(resetTimers);
 #ifdef HLTCA_STANDALONE
     times[4] += timer.GetCurrentElapsedTime();
     nCount++;
@@ -315,8 +323,8 @@ void AliHLTTPCGMMerger::UnpackSlices()
     for ( int itr = 0; itr < slice.NLocalTracks(); itr++, sliceTr = sliceTr->GetNextTrack() ) {
       AliHLTTPCGMSliceTrack &track = fSliceTrackInfos[nTracksCurrent];
       track.Set( sliceTr, alpha, iSlice );
-      if( !track.FilterErrors( fSliceParam, HLTCA_MAX_SIN_PHI ) ) continue;
-      if (DEBUG) printf("Slice %d, Track %d, QPt %f DzDs %f\n", iSlice, itr, track.QPt(), track.DzDs());
+      if( !track.FilterErrors( fSliceParam, HLTCA_MAX_SIN_PHI, 0.1f ) ) continue;
+      if (DEBUG) printf("INPUT Slice %d, Track %d, QPt %f DzDs %f\n", iSlice, itr, track.QPt(), track.DzDs());
       track.SetPrevNeighbour( -1 );
       track.SetNextNeighbour( -1 );
       track.SetSliceNeighbour( -1 );
@@ -783,9 +791,14 @@ void AliHLTTPCGMMerger::CollectMergedTracks()
           cl[i].fZ = trackClusters[i].GetZ();
           cl[i].fRow = trackClusters[i].GetRow();
           cl[i].fId = trackClusters[i].GetId();
-          cl[i].fState = 0;
+          cl[i].fAmp = trackClusters[i].GetAmp();
+          cl[i].fState = trackClusters[i].GetFlags() & AliHLTTPCGMMergedTrackHit::hwcfFlags; //Only allow edge and deconvoluted flags
           cl[i].fSlice = clA[i].x;
           cl[i].fLeg = clA[i].y;
+#ifdef GMPropagatePadRowTime
+          cl[i].fPad = trackClusters[i].fPad;
+          cl[i].fTime = trackClusters[i].fTime;
+#endif
       }
 
       AliHLTTPCGMMergedTrack &mergedTrack = fOutputTracks[fNOutputTracks];
@@ -815,23 +828,50 @@ void AliHLTTPCGMMerger::CollectMergedTracks()
       p1.DzDs()  = p2.DzDs();
       p1.QPt()  = p2.QPt();
       mergedTrack.SetAlpha( p2.Alpha() );
-
+      
       //if (nParts > 1) printf("Merged %d: QPt %f %d parts %d hits\n", fNOutputTracks, p1.QPt(), nParts, nHits);
+
+#if defined(BUILD_QA) && defined(HLTCA_STANDALONE) && !defined(HLTCA_GPUCODE)
+      if (SuppressTrack(fNOutputTracks))
+      {
+          mergedTrack.SetOK(0);
+          mergedTrack.SetNClusters(0);
+      }
+#endif
 
       fNOutputTracks++;
       nOutTrackClusters += nHits;
     }
   }
+  
+  unsigned int maxId = 0;
+  for (int k = 0;k < nOutTrackClusters;k++)
+  {
+    if (fClusters[k].fId > maxId) maxId = fClusters[k].fId;
+  }
+  maxId++;
+  unsigned char* sharedCount = new unsigned char[maxId];
+  for (unsigned int k = 0;k < maxId;k++) sharedCount[k] = 0;
+  for (int k = 0;k < nOutTrackClusters;k++)
+  {
+    if (sharedCount[fClusters[k].fId] < 255) sharedCount[fClusters[k].fId]++;
+  }
+  for (int k = 0;k < nOutTrackClusters;k++)
+  {
+    if (sharedCount[fClusters[k].fId] >= 2) fClusters[k].fState |= AliHLTTPCGMMergedTrackHit::flagShared;
+  }
+  delete[] sharedCount;
+  
   fNOutputTrackClusters = nOutTrackClusters;
 }
 
-void AliHLTTPCGMMerger::Refit()
+void AliHLTTPCGMMerger::Refit(bool resetTimers)
 {
   //* final refit
 #ifdef HLTCA_GPU_MERGER
   if (fGPUTracker && fGPUTracker->IsInitialized())
   {
-    fGPUTracker->RefitMergedTracks(this);
+    fGPUTracker->RefitMergedTracks(this, resetTimers);
   }
   else
 #endif

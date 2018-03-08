@@ -74,8 +74,8 @@ void AliHLTTPCGMOfflineFitter::Initialize( const AliHLTTPCCAParam& hltParam, Lon
   AliTPCReconstructor *tpcRec = new AliTPCReconstructor();
   tpcRec->SetRecoParam( AliTPCcalibDB::Instance()->GetTransform()->GetCurrentRecoParam() );
 
-  (this)->~AliTPCtracker();   //call the destructor explicitly
-  new (this) AliTPCtracker(param); // call the constructor 
+  //(this)->~AliTPCtracker();   //call the destructor explicitly
+  //new (this) AliTPCtracker(param); // call the constructor 
 
   AliTPCtracker::fSectors = AliTPCtracker::fInnerSec; 
   // AliTPCReconstructor::ParseOptions(tracker);  : not important, it only set useHLTClusters flag
@@ -276,7 +276,6 @@ bool AliHLTTPCGMOfflineFitter::FitOffline( const AliHLTTPCGMPolynomialField* fie
     AliHLTTPCGMPropagator prop;
     //    prop.SetMaterial( kRadLen, kRho );
     prop.SetPolynomialField( field );  
-    prop.SetUseMeanMomentum( 0 );
     prop.SetContinuousTracking( 0 );
     prop.SetMaxSinPhi( maxSinPhi );
     prop.SetToyMCEventsFlag( fCAParam.ToyMCEventsFlag());
